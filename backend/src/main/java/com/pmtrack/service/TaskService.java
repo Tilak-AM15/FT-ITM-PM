@@ -69,7 +69,7 @@ public class TaskService {
                     .collect(Collectors.toList());
         }
 
-        return taskRepository.findTasksAssignedToUser(user.getId(), user).stream()
+        return taskRepository.findTasksAssignedToUser(user.getId()).stream()
                 .map(this::mapToTaskResponse)
                 .collect(Collectors.toList());
     }
