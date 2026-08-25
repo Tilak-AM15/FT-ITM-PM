@@ -1,878 +1,429 @@
 package com.pmtrack.service;
 
+import com.pmtrack.dto.AuthDto;
 import com.pmtrack.dto.TaskDto;
-import com.pmtrack.model.*;
-import com.pmtrack.repository.ProjectRepository;
-import com.pmtrack.repository.TaskRepository;
-import com.pmtrack.repository.UserRepository;
+import com.pmtrack.model.;
+import com.pmtrack.repository.;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-import java.time.LocalDateTime;
-import java.util.*;
+import java.time.LocalDate;
+import java.util.ArrayList;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Set;
 import java.util.stream.Collectors;
 
 @Service
 public class TaskService {
 
-    private final TaskRepository taskRepository;
-    private final ProjectRepository projectRepository;
-    private final UserRepository userRepository;
-    private final ProjectService projectService;
-    private final AuditService auditService;
-    private final NotificationService notificationService;
+private final TaskRepository taskRepository;
+private final ProjectRepository projectRepository;
+private final UserRepository userRepository;
+private final SubTaskRepository subTaskRepository;
+private final TaskDependencyRepository taskDependencyRepository;
+private final TaskCommentRepository taskCommentRepository;
+private final TimesheetRepository timesheetRepository;
+private final AuditService auditService;
+private final NotificationService notificationService;
+private final ProjectService projectService;
 
-    public TaskService(
-            TaskRepository taskRepository,
-            ProjectRepository projectRepository,
-            UserRepository userRepository,
-            ProjectService projectService,
-            AuditService auditService,
-            NotificationService notificationService) {
+public TaskService(TaskRepository taskRepository, ProjectRepository projectRepository,
+                   UserRepository userRepository, SubTaskRepository subTaskRepository,
+                   TaskDependencyRepository taskDependencyRepository, TaskCommentRepository taskCommentRepository,
+                   TimesheetRepository timesheetRepository, AuditService auditService,
+                   NotificationService notificationService, ProjectService projectService) {
+    this.taskRepository = taskRepository;
+    this.projectRepository = projectRepository;
+    this.userRepository = userRepository;
+    this.subTaskRepository = subTaskRepository;
+    this.taskDependencyRepository = taskDependencyRepository;
+    this.taskCommentRepository = taskCommentRepository;
+    this.timesheetRepository = timesheetRepository;
+    this.auditService = auditService;
+    this.notificationService = notificationService;
+    this.projectService = projectService;
+}
 
-        this.taskRepository = taskRepository;
-        this.projectRepository = projectRepository;
-        this.userRepository = userRepository;
-        this.projectService = projectService;
-        this.auditService = auditService;
-        this.notificationService = notificationService;
+@Transactional(readOnly = true)
+public List<TaskDto.TaskResponse> getTasksByProjectId(Long projectId, User user) {
+    Project project = projectService.getProjectEntityById(projectId);
+    projectService.assertCanAccessProject(project, user);
+    return taskRepository.findByProjectId(projectId).stream()
+            .map(this::mapToTaskResponse)
+            .collect(Collectors.toList());
+}
+
+@Transactional(readOnly = true)
+public List<TaskDto.TaskResponse> getTasksForUser(User user) {
+    if (user.getRole() == Role.SUPER_ADMIN || user.getRole() == Role.ADMIN ||
+        user.getRole() == Role.MANAGEMENT || user.getRole() == Role.FINANCE_HR) {
+        return taskRepository.findAll().stream().map(this::mapToTaskResponse).collect(Collectors.toList());
     }
 
-    /**
-     * Get tasks visible to the current user.
-     *
-     * Employees see:
-     * - Tasks they own
-     * - Tasks assigned to them
-     *
-     * Project Managers see:
-     * - Tasks belonging to projects they manage
-     */
-    @Transactional(readOnly = true)
-    public List<TaskDto.TaskResponse> getTasksForUser(User user) {
-
-        if (user.getRole() == Role.SUPER_ADMIN
-                || user.getRole() == Role.ADMIN
-                || user.getRole() == Role.MANAGEMENT
-                || user.getRole() == Role.FINANCE_HR) {
-
-            return taskRepository.findAll()
-                    .stream()
-                    .map(this::mapToTaskResponse)
-                    .collect(Collectors.toList());
-        }
-
-        if (user.getRole() == Role.PROJECT_MANAGER) {
-
-            return projectRepository.findByProjectManager(user)
-                    .stream()
-                    .flatMap(project ->
-                            taskRepository.findByProject(project).stream()
-                    )
-                    .distinct()
-                    .map(this::mapToTaskResponse)
-                    .collect(Collectors.toList());
-        }
-
-        // Employee / Team Lead / other users
-        return taskRepository
-                .findTasksAssignedToUser(user.getId(), user)
-                .stream()
+    if (user.getRole() == Role.PROJECT_MANAGER) {
+        return projectRepository.findByProjectManager(user).stream()
+                .flatMap(project -> taskRepository.findByProject(project).stream())
+                .distinct()
                 .map(this::mapToTaskResponse)
                 .collect(Collectors.toList());
     }
 
-    /**
-     * Get all tasks for a project.
-     */
-    @Transactional(readOnly = true)
-    public List<TaskDto.TaskResponse> getTasksByProjectId(
-            Long projectId,
-            User user) {
+    return taskRepository.findTasksAssignedToUser(user.getId(), user).stream()
+            .map(this::mapToTaskResponse)
+            .collect(Collectors.toList());
+}
 
-        Project project = projectRepository.findById(projectId)
-                .orElseThrow(() ->
-                        new RuntimeException("Project not found"));
+@Transactional(readOnly = true)
+public TaskDto.TaskResponse getTaskById(Long id, User user) {
+    Task task = taskRepository.findById(id)
+            .orElseThrow(() -> new RuntimeException("Task not found with id: " + id));
+    projectService.assertCanAccessProject(task.getProject(), user);
+    return mapToTaskResponse(task);
+}
 
-        if (!projectService.canAccessProject(project, user)) {
-            throw new RuntimeException(
-                    "You do not have access to this project");
-        }
+@Transactional(readOnly = true)
+public Task getTaskEntityById(Long id) {
+    return taskRepository.findById(id)
+            .orElseThrow(() -> new RuntimeException("Task not found with id: " + id));
+}
 
-        return taskRepository.findByProject(project)
-                .stream()
-                .map(this::mapToTaskResponse)
-                .collect(Collectors.toList());
+@Transactional
+public TaskDto.TaskResponse createTask(TaskDto.TaskRequest request, User creator) {
+    Project project = projectRepository.findById(request.getProjectId())
+            .orElseThrow(() -> new RuntimeException("Project not found with id: " + request.getProjectId()));
+    projectService.assertCanManageTasks(project, creator);
+    if (request.getStartDate() != null && request.getDueDate() != null && request.getDueDate().isBefore(request.getStartDate())) {
+        throw new RuntimeException("Task due date cannot be before start date.");
+    }
+    if (request.getEstimatedHours() != null && request.getEstimatedHours() < 0) {
+        throw new RuntimeException("Estimated hours cannot be negative.");
     }
 
-    /**
-     * Get a single task.
-     */
-    @Transactional(readOnly = true)
-    public TaskDto.TaskResponse getTaskById(
-            Long taskId,
-            User user) {
+    Task task = new Task();
+    task.setProject(project);
 
-        Task task = taskRepository.findById(taskId)
-                .orElseThrow(() ->
-                        new RuntimeException("Task not found"));
+    String taskCode = request.getTaskCode();
+    if (taskCode == null || taskCode.isBlank()) {
+        taskCode = project.getProjectCode() + "-T" + (taskRepository.countTotalTasksByProjectId(project.getId()) + 1);
+    }
+    if (taskRepository.findByTaskCode(taskCode).isPresent()) {
+        throw new RuntimeException("Task code already exists: " + taskCode);
+    }
+    task.setTaskCode(taskCode);
+    task.setTitle(request.getTitle());
+    task.setDescription(request.getDescription());
+    task.setModuleName(request.getModuleName() != null ? request.getModuleName() : "General");
+    task.setPriority(request.getPriority() != null ? request.getPriority() : TaskPriority.MEDIUM);
+    task.setStatus(request.getStatus() != null ? request.getStatus() : TaskStatus.TO_DO);
+    task.setStartDate(request.getStartDate() != null ? request.getStartDate() : LocalDate.now());
+    task.setDueDate(request.getDueDate() != null ? request.getDueDate() : LocalDate.now().plusWeeks(1));
+    task.setEstimatedHours(request.getEstimatedHours() != null ? request.getEstimatedHours() : 8.0);
+    task.setAttachmentUrls(validateUrls(request.getAttachmentUrls()));
+    task.setActualHours(0.0);
+    task.setProgressPercentage(0);
 
-        if (!canAccessTask(task, user)) {
-            throw new RuntimeException(
-                    "You do not have access to this task");
+    if (request.getTaskOwnerId() != null) {
+        User owner = userRepository.findById(request.getTaskOwnerId())
+                .orElseThrow(() -> new RuntimeException("Task owner not found: " + request.getTaskOwnerId()));
+        if (!projectService.canAccessProject(project, owner)) {
+            throw new RuntimeException("Task owner must have access to the project.");
         }
-
-        return mapToTaskResponse(task);
+        task.setTaskOwner(owner);
     }
 
-    /**
-     * Create a new task.
-     */
-    @Transactional
-    public TaskDto.TaskResponse createTask(
-            TaskDto.TaskRequest request,
-            User creator) {
-
-        Project project = projectRepository.findById(request.getProjectId())
-                .orElseThrow(() ->
-                        new RuntimeException("Project not found"));
-
-        if (!projectService.canAccessProject(project, creator)) {
-            throw new RuntimeException(
-                    "You do not have access to this project");
-        }
-
-        Task task = new Task();
-
-        task.setProject(project);
-        task.setTaskCode(generateTaskCode(project));
-        task.setTitle(request.getTitle());
-        task.setDescription(request.getDescription());
-
-        if (request.getPriority() != null) {
-            task.setPriority(request.getPriority());
-        } else {
-            task.setPriority(TaskPriority.MEDIUM);
-        }
-
-        task.setEstimatedHours(
-                request.getEstimatedHours() != null
-                        ? request.getEstimatedHours()
-                        : 0.0
-        );
-
-        task.setStatus(
-                request.getStatus() != null
-                        ? request.getStatus()
-                        : TaskStatus.TO_DO
-        );
-
-        task.setProgressPercentage(0);
-
-        /*
-         * The creator becomes the task owner when no explicit
-         * task owner is supplied.
-         */
-        User taskOwner = creator;
-
-        if (request.getTaskOwnerId() != null) {
-            taskOwner = userRepository.findById(
-                    request.getTaskOwnerId()
-            ).orElseThrow(() ->
-                    new RuntimeException(
-                            "Task owner not found: "
-                                    + request.getTaskOwnerId()
-                    ));
-
-            if (!projectService.canAccessProject(project, taskOwner)) {
-                throw new RuntimeException(
-                        "Task owner " + taskOwner.getUsername()
-                                + " is not assigned to the project."
-                );
+    Set<User> assignees = new HashSet<>();
+    if (request.getAssigneeIds() != null && !request.getAssigneeIds().isEmpty()) {
+        for (Long uid : request.getAssigneeIds()) {
+            User assignee = userRepository.findById(uid)
+                    .orElseThrow(() -> new RuntimeException("Assignee not found: " + uid));
+            if (!projectService.canAccessProject(project, assignee)) {
+                throw new RuntimeException("Assignee " + assignee.getUsername() + " is not assigned to the project.");
             }
+            assignees.add(assignee);
         }
+    }
+    task.setAssignees(assignees);
 
-        task.setTaskOwner(taskOwner);
+    if (request.getParentTaskId() != null) {
+        Task parent = taskRepository.findById(request.getParentTaskId())
+                .orElseThrow(() -> new RuntimeException("Parent task not found: " + request.getParentTaskId()));
+        if (!parent.getProject().getId().equals(project.getId())) {
+            throw new RuntimeException("Parent task must belong to the same project.");
+        }
+        task.setParentTask(parent);
+    }
 
-        /*
-         * Assign employees to the task.
-         */
+    Task savedTask = taskRepository.save(task);
+
+    // Add dependencies if any
+    if (request.getDependsOnTaskIds() != null) {
+        for (Long depId : request.getDependsOnTaskIds()) {
+            Task depTask = taskRepository.findById(depId)
+                    .orElseThrow(() -> new RuntimeException("Dependency task not found: " + depId));
+            if (!depTask.getProject().getId().equals(project.getId()) || depTask.getId().equals(savedTask.getId())) {
+                throw new RuntimeException("Dependencies must reference a different task in the same project.");
+            }
+            TaskDependency dep = new TaskDependency(savedTask, depTask, "FINISH_TO_START");
+            taskDependencyRepository.save(dep);
+        }
+    }
+
+    // Notify assignees
+    for (User assignee : assignees) {
+        notificationService.createNotification(
+                assignee,
+                "New Task Assigned: " + savedTask.getTitle(),
+                "You have been assigned to task " + savedTask.getTaskCode() + " in " + project.getName() + ". Due: " + savedTask.getDueDate(),
+                NotificationType.TASK_ASSIGNED,
+                "/tasks"
+        );
+    }
+
+    auditService.logAction(
+            creator,
+            "TASK_CREATED",
+            "Task",
+            savedTask.getId(),
+            null,
+            savedTask.getTitle() + " (" + savedTask.getStatus() + ")",
+            "Task created in project " + project.getProjectCode()
+    );
+
+    return mapToTaskResponse(savedTask);
+}
+
+@Transactional
+public TaskDto.TaskResponse updateTask(Long id, TaskDto.TaskRequest request, User modifier) {
+    Task task = getTaskEntityById(id);
+    projectService.assertCanManageTasks(task.getProject(), modifier);
+    if (request.getStartDate() != null && request.getDueDate() != null && request.getDueDate().isBefore(request.getStartDate())) {
+        throw new RuntimeException("Task due date cannot be before start date.");
+    }
+    String oldValues = "Status: " + task.getStatus() + ", Priority: " + task.getPriority() + ", EstHours: " + task.getEstimatedHours();
+
+    task.setTitle(request.getTitle());
+    task.setDescription(request.getDescription());
+    if (request.getModuleName() != null) task.setModuleName(request.getModuleName());
+    if (request.getPriority() != null) task.setPriority(request.getPriority());
+    if (request.getStatus() != null) task.setStatus(request.getStatus());
+    if (request.getStartDate() != null) task.setStartDate(request.getStartDate());
+    if (request.getDueDate() != null) task.setDueDate(request.getDueDate());
+    if (request.getEstimatedHours() != null) task.setEstimatedHours(request.getEstimatedHours());
+    if (request.getAttachmentUrls() != null) task.setAttachmentUrls(validateUrls(request.getAttachmentUrls()));
+
+    if (request.getTaskOwnerId() != null) {
+        User owner = userRepository.findById(request.getTaskOwnerId())
+                .orElseThrow(() -> new RuntimeException("Task owner not found: " + request.getTaskOwnerId()));
+        if (!projectService.canAccessProject(task.getProject(), owner)) {
+            throw new RuntimeException("Task owner must have access to the project.");
+        }
+        task.setTaskOwner(owner);
+    }
+
+    if (request.getAssigneeIds() != null) {
         Set<User> assignees = new HashSet<>();
-
-        if (request.getAssigneeIds() != null
-                && !request.getAssigneeIds().isEmpty()) {
-
-            for (Long userId : request.getAssigneeIds()) {
-
-                User assignee = userRepository.findById(userId)
-                        .orElseThrow(() ->
-                                new RuntimeException(
-                                        "Assignee not found: "
-                                                + userId
-                                ));
-
-                /*
-                 * Only users who have access to the project
-                 * can be assigned to its tasks.
-                 */
-                if (!projectService.canAccessProject(
-                        project,
-                        assignee)) {
-
-                    throw new RuntimeException(
-                            "Assignee "
-                                    + assignee.getUsername()
-                                    + " is not assigned to the project."
-                    );
-                }
-
-                assignees.add(assignee);
+        for (Long uid : request.getAssigneeIds()) {
+            User assignee = userRepository.findById(uid)
+                    .orElseThrow(() -> new RuntimeException("Assignee not found: " + uid));
+            if (!projectService.canAccessProject(task.getProject(), assignee)) {
+                throw new RuntimeException("Assignee " + assignee.getUsername() + " is not assigned to the project.");
             }
+            assignees.add(assignee);
         }
-
         task.setAssignees(assignees);
-
-        /*
-         * Billable defaults to true.
-         */
-        task.setBillable(
-                request.getBillable() == null
-                        || request.getBillable()
-        );
-
-        Task savedTask = taskRepository.save(task);
-
-        /*
-         * Audit the task creation.
-         */
-        auditService.logAction(
-                creator,
-                "TASK_CREATED",
-                "Task",
-                savedTask.getId(),
-                null,
-                savedTask.getTitle(),
-                "Task created: " + savedTask.getTitle()
-        );
-
-        /*
-         * Notify assigned users.
-         */
-        for (User assignee : assignees) {
-
-            if (!assignee.getId().equals(creator.getId())) {
-
-                notificationService.createNotification(
-                        assignee,
-                        "New Task Assigned",
-                        "You have been assigned task: "
-                                + savedTask.getTitle(),
-                        NotificationType.TASK_ASSIGNED,
-                        "/tasks/" + savedTask.getId()
-                );
-            }
-        }
-
-        return mapToTaskResponse(savedTask);
     }
 
-    /**
-     * Update task details and assignees.
-     */
-    @Transactional
-    public TaskDto.TaskResponse updateTask(
-            Long taskId,
-            TaskDto.TaskRequest request,
-            User modifier) {
+    Task saved = taskRepository.save(task);
 
-        Task task = taskRepository.findById(taskId)
-                .orElseThrow(() ->
-                        new RuntimeException("Task not found"));
+    String newValues = "Status: " + saved.getStatus() + ", Priority: " + saved.getPriority() + ", EstHours: " + saved.getEstimatedHours();
+    auditService.logAction(modifier, "TASK_UPDATED", "Task", saved.getId(), oldValues, newValues, "Task details updated");
 
-        if (!canModifyTask(task, modifier)) {
-            throw new RuntimeException(
-                    "You do not have permission to update this task");
-        }
+    return mapToTaskResponse(saved);
+}
 
-        String previousTitle = task.getTitle();
+@Transactional
+public TaskDto.TaskResponse updateTaskStatus(Long id, TaskStatus status, Integer progressPercentage, User modifier) {
+    Task task = getTaskEntityById(id);
+    if (status == null) {
+        throw new RuntimeException("Task status is required.");
+    }
+    boolean manager = modifier.getRole() == Role.SUPER_ADMIN || modifier.getRole() == Role.ADMIN
+            || modifier.getRole() == Role.PROJECT_MANAGER || modifier.getRole() == Role.TEAM_LEAD;
+    boolean assignee = task.getTaskOwner() != null && task.getTaskOwner().getId().equals(modifier.getId())
+            || task.getAssignees().stream().anyMatch(u -> u.getId().equals(modifier.getId()));
+    if (manager) {
+        projectService.assertCanManageTasks(task.getProject(), modifier);
+    } else if (!assignee) {
+        throw new RuntimeException("Only the task owner, assignees, or authorized managers can update task status.");
+    }
+    if (progressPercentage != null && (progressPercentage < 0 || progressPercentage > 100)) {
+        throw new RuntimeException("Progress percentage must be between 0 and 100.");
+    }
+    TaskStatus oldStatus = task.getStatus();
+    task.setStatus(status);
 
-        if (request.getTitle() != null) {
-            task.setTitle(request.getTitle());
-        }
-
-        if (request.getDescription() != null) {
-            task.setDescription(request.getDescription());
-        }
-
-        if (request.getPriority() != null) {
-            task.setPriority(request.getPriority());
-        }
-
-        if (request.getEstimatedHours() != null) {
-            task.setEstimatedHours(request.getEstimatedHours());
-        }
-
-        if (request.getStatus() != null) {
-            task.setStatus(request.getStatus());
-        }
-
-        if (request.getBillable() != null) {
-            task.setBillable(request.getBillable());
-        }
-
-        /*
-         * Update task owner.
-         */
-        if (request.getTaskOwnerId() != null) {
-
-            User owner = userRepository.findById(
-                    request.getTaskOwnerId()
-            ).orElseThrow(() ->
-                    new RuntimeException(
-                            "Task owner not found"));
-
-            if (!projectService.canAccessProject(
-                    task.getProject(),
-                    owner)) {
-
-                throw new RuntimeException(
-                        "Task owner is not assigned to the project");
-            }
-
-            task.setTaskOwner(owner);
-        }
-
-        /*
-         * Update assignees.
-         */
-        if (request.getAssigneeIds() != null) {
-
-            Set<User> newAssignees = new HashSet<>();
-
-            for (Long userId : request.getAssigneeIds()) {
-
-                User assignee = userRepository.findById(userId)
-                        .orElseThrow(() ->
-                                new RuntimeException(
-                                        "Assignee not found: "
-                                                + userId
-                                ));
-
-                if (!projectService.canAccessProject(
-                        task.getProject(),
-                        assignee)) {
-
-                    throw new RuntimeException(
-                            "Assignee "
-                                    + assignee.getUsername()
-                                    + " is not assigned to the project."
-                    );
-                }
-
-                newAssignees.add(assignee);
-            }
-
-            task.setAssignees(newAssignees);
-        }
-
-        Task savedTask = taskRepository.save(task);
-
-        auditService.logAction(
-                modifier,
-                "TASK_UPDATED",
-                "Task",
-                savedTask.getId(),
-                previousTitle,
-                savedTask.getTitle(),
-                "Task updated"
-        );
-
-        return mapToTaskResponse(savedTask);
+    if (progressPercentage != null) {
+        task.setProgressPercentage(progressPercentage);
+    } else if (status == TaskStatus.COMPLETED) {
+        task.setProgressPercentage(100);
     }
 
-    /**
-     * Update task status and progress.
-     */
-    @Transactional
-    public TaskDto.TaskResponse updateTaskStatus(
-            Long taskId,
-            TaskStatus status,
-            Integer progressPercentage,
-            User modifier) {
+    Task saved = taskRepository.save(task);
 
-        Task task = taskRepository.findById(taskId)
-                .orElseThrow(() ->
-                        new RuntimeException("Task not found"));
+    auditService.logAction(
+            modifier,
+            "TASK_STATUS_CHANGED",
+            "Task",
+            saved.getId(),
+            oldStatus.name(),
+            status.name(),
+            "Task status updated to " + status.name()
+    );
 
-        if (!canAccessTask(task, modifier)) {
-            throw new RuntimeException(
-                    "You do not have access to this task");
+    return mapToTaskResponse(saved);
+}
+
+@Transactional
+public TaskDto.SubTaskDto addSubTask(Long taskId, String title, Long assigneeId, User actor) {
+    Task task = getTaskEntityById(taskId);
+    projectService.assertCanManageTasks(task.getProject(), actor);
+    if (title == null || title.isBlank()) throw new RuntimeException("Sub-task title is required.");
+    User assignedTo = assigneeId != null ? userRepository.findById(assigneeId).orElseThrow(() -> new RuntimeException("Assignee not found: " + assigneeId)) : null;
+    if (assignedTo != null && !projectService.canAccessProject(task.getProject(), assignedTo)) {
+        throw new RuntimeException("Sub-task assignee must have access to the project.");
+    }
+    SubTask subTask = new SubTask(task, title, assignedTo);
+    SubTask saved = subTaskRepository.save(subTask);
+    auditService.logAction(actor, "SUBTASK_CREATED", "Task", taskId, null, title, "Sub-task created");
+
+    TaskDto.SubTaskDto dto = new TaskDto.SubTaskDto();
+    dto.setId(saved.getId());
+    dto.setTaskId(taskId);
+    dto.setTitle(saved.getTitle());
+    dto.setCompleted(saved.isCompleted());
+    if (saved.getAssignedTo() != null) {
+        dto.setAssignedTo(new AuthDto.UserProfileDto(saved.getAssignedTo()));
+    }
+    return dto;
+}
+
+@Transactional
+public void toggleSubTask(Long subTaskId, User actor) {
+    SubTask st = subTaskRepository.findById(subTaskId)
+            .orElseThrow(() -> new RuntimeException("Sub-task not found: " + subTaskId));
+    boolean allowed = st.getAssignedTo() != null && st.getAssignedTo().getId().equals(actor.getId());
+    if (!allowed) {
+        projectService.assertCanManageTasks(st.getTask().getProject(), actor);
+    }
+    boolean oldCompleted = st.isCompleted();
+    st.setCompleted(!st.isCompleted());
+    subTaskRepository.save(st);
+    auditService.logAction(actor, "SUBTASK_STATUS_CHANGED", "Task", st.getTask().getId(), String.valueOf(oldCompleted), String.valueOf(st.isCompleted()), "Sub-task completion updated");
+}
+
+@Transactional
+public TaskDto.TaskCommentDto addComment(Long taskId, String content, User author) {
+    Task task = getTaskEntityById(taskId);
+    projectService.assertCanAccessProject(task.getProject(), author);
+    if (content == null || content.isBlank()) throw new RuntimeException("Comment content is required.");
+    TaskComment comment = new TaskComment(task, author, content.trim());
+    TaskComment saved = taskCommentRepository.save(comment);
+    auditService.logAction(author, "TASK_COMMENT_ADDED", "Task", taskId, null, content.trim(), "Task comment added");
+
+    TaskDto.TaskCommentDto dto = new TaskDto.TaskCommentDto();
+    dto.setId(saved.getId());
+    dto.setTaskId(taskId);
+    dto.setAuthor(new AuthDto.UserProfileDto(author));
+    dto.setContent(saved.getContent());
+    dto.setCreatedAt(saved.getCreatedAt());
+    return dto;
+}
+
+private List<String> validateUrls(List<String> urls) {
+    if (urls == null) return new ArrayList<>();
+    if (urls.size() > 20) throw new RuntimeException("A task cannot contain more than 20 attachment links.");
+    return urls.stream().map(String::trim).filter(u -> !u.isBlank()).peek(u -> {
+        if (!(u.startsWith("https://") || u.startsWith("http://"))) {
+            throw new RuntimeException("Attachment links must start with http:// or https://.");
         }
+        if (u.length() > 500) throw new RuntimeException("An attachment link is too long.");
+    }).distinct().collect(Collectors.toList());
+}
 
-        TaskStatus previousStatus = task.getStatus();
+public TaskDto.TaskResponse mapToTaskResponse(Task task) {
+    TaskDto.TaskResponse dto = new TaskDto.TaskResponse();
+    dto.setId(task.getId());
+    dto.setProjectId(task.getProject().getId());
+    dto.setProjectName(task.getProject().getName());
+    dto.setProjectCode(task.getProject().getProjectCode());
+    dto.setTaskCode(task.getTaskCode());
+    dto.setTitle(task.getTitle());
+    dto.setDescription(task.getDescription());
+    dto.setModuleName(task.getModuleName());
+    if (task.getTaskOwner() != null) {
+        dto.setTaskOwner(new AuthDto.UserProfileDto(task.getTaskOwner()));
+    }
+    dto.setAssignees(task.getAssignees().stream().map(AuthDto.UserProfileDto::new).collect(Collectors.toList()));
+    dto.setPriority(task.getPriority());
+    dto.setStatus(task.getStatus());
+    dto.setStartDate(task.getStartDate());
+    dto.setDueDate(task.getDueDate());
+    dto.setEstimatedHours(task.getEstimatedHours());
 
-        task.setStatus(status);
+    // Calculate actual hours logged and approved for this task
+    Double actualHrs = timesheetRepository.sumApprovedHoursByTaskId(task.getId());
+    dto.setActualHours(actualHrs != null ? actualHrs : 0.0);
 
-        if (progressPercentage != null) {
-
-            int progress = Math.max(
-                    0,
-                    Math.min(100, progressPercentage)
-            );
-
-            task.setProgressPercentage(progress);
-        }
-
-        if (status == TaskStatus.COMPLETED) {
-            task.setProgressPercentage(100);
-        }
-
-        Task savedTask = taskRepository.save(task);
-
-        auditService.logAction(
-                modifier,
-                "TASK_STATUS_UPDATED",
-                "Task",
-                savedTask.getId(),
-                previousStatus != null
-                        ? previousStatus.name()
-                        : null,
-                status != null
-                        ? status.name()
-                        : null,
-                "Task status updated"
-        );
-
-        /*
-         * Notify task owner and assignees when status changes.
-         */
-        Set<User> recipients = new HashSet<>();
-
-        if (task.getTaskOwner() != null) {
-            recipients.add(task.getTaskOwner());
-        }
-
-        if (task.getAssignees() != null) {
-            recipients.addAll(task.getAssignees());
-        }
-
-        for (User recipient : recipients) {
-
-            if (recipient.getId().equals(modifier.getId())) {
-                continue;
-            }
-
-            notificationService.createNotification(
-                    recipient,
-                    "Task Status Updated",
-                    "Task \"" + task.getTitle()
-                            + "\" is now "
-                            + status,
-                    NotificationType.TASK_UPDATED,
-                    "/tasks/" + task.getId()
-            );
-        }
-
-        return mapToTaskResponse(savedTask);
+    dto.setProgressPercentage(task.getProgressPercentage());
+    if (task.getParentTask() != null) {
+        dto.setParentTaskId(task.getParentTask().getId());
     }
 
-    /**
-     * Add a sub-task.
-     */
-    @Transactional
-    public TaskDto.SubTaskDto addSubTask(
-            Long taskId,
-            String title,
-            Long assigneeId,
-            User actor) {
-
-        Task task = taskRepository.findById(taskId)
-                .orElseThrow(() ->
-                        new RuntimeException("Task not found"));
-
-        if (!canModifyTask(task, actor)) {
-            throw new RuntimeException(
-                    "You do not have permission to modify this task");
-        }
-
-        User assignee = null;
-
-        if (assigneeId != null) {
-
-            assignee = userRepository.findById(assigneeId)
-                    .orElseThrow(() ->
-                            new RuntimeException(
-                                    "Sub-task assignee not found"));
-
-            if (!projectService.canAccessProject(
-                    task.getProject(),
-                    assignee)) {
-
-                throw new RuntimeException(
-                        "Sub-task assignee is not assigned to the project");
-            }
-        }
-
-        SubTask subTask = new SubTask();
-        subTask.setTask(task);
-        subTask.setTitle(title);
-        subTask.setAssignedTo(assignee);
-        subTask.setCompleted(false);
-
-        task.getSubTasks().add(subTask);
-
-        taskRepository.save(task);
-
-        return mapToSubTaskResponse(subTask);
-    }
-
-    /**
-     * Toggle sub-task completion.
-     */
-    @Transactional
-    public void toggleSubTask(
-            Long subTaskId,
-            User actor) {
-
-        Task task = taskRepository.findAll()
-                .stream()
-                .filter(t ->
-                        t.getSubTasks() != null
-                                && t.getSubTasks()
-                                .stream()
-                                .anyMatch(
-                                        s -> s.getId()
-                                                .equals(subTaskId)
-                                ))
-                .findFirst()
-                .orElseThrow(() ->
-                        new RuntimeException(
-                                "Sub-task not found"));
-
-        if (!canAccessTask(task, actor)) {
-            throw new RuntimeException(
-                    "You do not have access to this task");
-        }
-
-        task.getSubTasks()
-                .stream()
-                .filter(s ->
-                        s.getId().equals(subTaskId))
-                .findFirst()
-                .ifPresent(s ->
-                        s.setCompleted(!s.isCompleted()));
-
-        taskRepository.save(task);
-    }
-
-    /**
-     * Add a comment to a task.
-     */
-    @Transactional
-    public TaskDto.TaskCommentDto addComment(
-            Long taskId,
-            String content,
-            User author) {
-
-        Task task = taskRepository.findById(taskId)
-                .orElseThrow(() ->
-                        new RuntimeException("Task not found"));
-
-        if (!canAccessTask(task, author)) {
-            throw new RuntimeException(
-                    "You do not have access to this task");
-        }
-
-        TaskComment comment = new TaskComment();
-        comment.setTask(task);
-        comment.setAuthor(author);
-        comment.setContent(content);
-        comment.setCreatedAt(LocalDateTime.now());
-
-        task.getComments().add(comment);
-
-        taskRepository.save(task);
-
-        return mapToCommentResponse(comment);
-    }
-
-    /**
-     * Check whether a user can access a task.
-     */
-    private boolean canAccessTask(
-            Task task,
-            User user) {
-
-        if (user == null) {
-            return false;
-        }
-
-        if (user.getRole() == Role.SUPER_ADMIN
-                || user.getRole() == Role.ADMIN
-                || user.getRole() == Role.MANAGEMENT
-                || user.getRole() == Role.FINANCE_HR) {
-
-            return true;
-        }
-
-        if (task.getTaskOwner() != null
-                && task.getTaskOwner()
-                .getId()
-                .equals(user.getId())) {
-
-            return true;
-        }
-
-        if (task.getAssignees() != null
-                && task.getAssignees()
-                .stream()
-                .anyMatch(a ->
-                        a.getId().equals(user.getId()))) {
-
-            return true;
-        }
-
-        return task.getProject() != null
-                && projectService.canAccessProject(
-                        task.getProject(),
-                        user);
-    }
-
-    /**
-     * Check whether a user can modify a task.
-     */
-    private boolean canModifyTask(
-            Task task,
-            User user) {
-
-        if (user == null) {
-            return false;
-        }
-
-        if (user.getRole() == Role.SUPER_ADMIN
-                || user.getRole() == Role.ADMIN) {
-
-            return true;
-        }
-
-        if (task.getProject() != null
-                && task.getProject()
-                .getProjectManager() != null
-                && task.getProject()
-                .getProjectManager()
-                .getId()
-                .equals(user.getId())) {
-
-            return true;
-        }
-
-        if (task.getTaskOwner() != null
-                && task.getTaskOwner()
-                .getId()
-                .equals(user.getId())) {
-
-            return true;
-        }
-
-        return false;
-    }
-
-    /**
-     * Generate a unique task code.
-     */
-    private String generateTaskCode(Project project) {
-
-        String prefix = project.getProjectCode() != null
-                ? project.getProjectCode()
-                : "TASK";
-
-        long count =
-                taskRepository.countTotalTasksByProjectId(
-                        project.getId());
-
-        return prefix + "-TASK-" + (count + 1);
-    }
-
-    /**
-     * Convert Task entity to response DTO.
-     */
-    private TaskDto.TaskResponse mapToTaskResponse(Task task) {
-
-        TaskDto.TaskResponse dto =
-                new TaskDto.TaskResponse();
-
-        dto.setId(task.getId());
-        dto.setTaskCode(task.getTaskCode());
-        dto.setTitle(task.getTitle());
-        dto.setDescription(task.getDescription());
-
-        dto.setStatus(task.getStatus());
-        dto.setPriority(task.getPriority());
-        dto.setEstimatedHours(task.getEstimatedHours());
-        dto.setBillable(task.isBillable());
-        dto.setProgressPercentage(
-                task.getProgressPercentage());
-
-        if (task.getProject() != null) {
-
-            dto.setProjectId(
-                    task.getProject().getId());
-
-            dto.setProjectName(
-                    task.getProject().getName());
-
-            dto.setProjectCode(
-                    task.getProject().getProjectCode());
-        }
-
-        if (task.getTaskOwner() != null) {
-
-            dto.setTaskOwnerId(
-                    task.getTaskOwner().getId());
-
-            dto.setTaskOwnerName(
-                    task.getTaskOwner().getFullName());
-        }
-
-        /*
-         * Map assignees.
-         */
-        if (task.getAssignees() != null) {
-
-            dto.setAssignees(
-                    task.getAssignees()
-                            .stream()
-                            .map(this::mapToUserSummary)
-                            .collect(Collectors.toList())
-            );
-        } else {
-
-            dto.setAssignees(
-                    new ArrayList<>()
-            );
-        }
-
-        /*
-         * Map subtasks.
-         */
-        if (task.getSubTasks() != null) {
-
-            dto.setSubTasks(
-                    task.getSubTasks()
-                            .stream()
-                            .map(this::mapToSubTaskResponse)
-                            .collect(Collectors.toList())
-            );
-        } else {
-
-            dto.setSubTasks(
-                    new ArrayList<>()
-            );
-        }
-
-        /*
-         * Map comments.
-         */
-        if (task.getComments() != null) {
-
-            dto.setComments(
-                    task.getComments()
-                            .stream()
-                            .map(this::mapToCommentResponse)
-                            .collect(Collectors.toList())
-            );
-        } else {
-
-            dto.setComments(
-                    new ArrayList<>()
-            );
-        }
-
-        /*
-         * Avoid returning Hibernate lazy proxies directly.
-         */
-        if (task.getAttachmentUrls() != null) {
-
-            dto.setAttachmentUrls(
-                    new ArrayList<>(
-                            task.getAttachmentUrls()
-                    )
-            );
-
-        } else {
-
-            dto.setAttachmentUrls(
-                    new ArrayList<>()
-            );
-        }
-
-        return dto;
-    }
-
-    /**
-     * Map user to a lightweight user summary.
-     */
-    private TaskDto.UserSummaryDto mapToUserSummary(
-            User user) {
-
-        TaskDto.UserSummaryDto dto =
-                new TaskDto.UserSummaryDto();
-
-        dto.setId(user.getId());
-        dto.setUsername(user.getUsername());
-        dto.setFullName(user.getFullName());
-        dto.setEmail(user.getEmail());
-
-        return dto;
-    }
-
-    /**
-     * Map sub-task entity to DTO.
-     */
-    private TaskDto.SubTaskDto mapToSubTaskResponse(
-            SubTask subTask) {
-
-        TaskDto.SubTaskDto dto =
-                new TaskDto.SubTaskDto();
-
-        dto.setId(subTask.getId());
-        dto.setTitle(subTask.getTitle());
-        dto.setCompleted(subTask.isCompleted());
-
-        if (subTask.getAssignedTo() != null) {
-
-            dto.setAssignedToId(
-                    subTask.getAssignedTo().getId());
-
-            dto.setAssignedToName(
-                    subTask.getAssignedTo().getFullName());
-        }
-
-        return dto;
-    }
-
-    /**
-     * Map comment entity to DTO.
-     */
-    private TaskDto.TaskCommentDto mapToCommentResponse(
-            TaskComment comment) {
-
-        TaskDto.TaskCommentDto dto =
-                new TaskDto.TaskCommentDto();
-
-        dto.setId(comment.getId());
-        dto.setContent(comment.getContent());
-        dto.setCreatedAt(comment.getCreatedAt());
-
-        if (comment.getAuthor() != null) {
-
-            dto.setAuthorId(
-                    comment.getAuthor().getId());
-
-            dto.setAuthorName(
-                    comment.getAuthor().getFullName());
-        }
-
-        return dto;
-    }
+    boolean isOverdue = task.getDueDate() != null && task.getDueDate().isBefore(LocalDate.now()) && task.getStatus() != TaskStatus.COMPLETED;
+    dto.setOverdue(isOverdue);
+
+    // Subtasks
+    List<SubTask> subTasks = subTaskRepository.findByTaskId(task.getId());
+    dto.setSubTasks(subTasks.stream().map(st -> {
+        TaskDto.SubTaskDto sd = new TaskDto.SubTaskDto();
+        sd.setId(st.getId());
+        sd.setTaskId(task.getId());
+        sd.setTitle(st.getTitle());
+        sd.setCompleted(st.isCompleted());
+        if (st.getAssignedTo() != null) sd.setAssignedTo(new AuthDto.UserProfileDto(st.getAssignedTo()));
+        return sd;
+    }).collect(Collectors.toList()));
+
+    // Comments
+    List<TaskComment> comments = taskCommentRepository.findByTaskIdOrderByCreatedAtAsc(task.getId());
+    dto.setComments(comments.stream().map(c -> {
+        TaskDto.TaskCommentDto cd = new TaskDto.TaskCommentDto();
+        cd.setId(c.getId());
+        cd.setTaskId(task.getId());
+        cd.setAuthor(new AuthDto.UserProfileDto(c.getAuthor()));
+        cd.setContent(c.getContent());
+        cd.setCreatedAt(c.getCreatedAt());
+        return cd;
+    }).collect(Collectors.toList()));
+
+    // Dependencies
+    List<TaskDependency> deps = taskDependencyRepository.findByTaskId(task.getId());
+    dto.setAttachmentUrls(task.getAttachmentUrls());
+    dto.setDependencies(deps.stream().map(d -> {
+        TaskDto.DependencyDto dd = new TaskDto.DependencyDto();
+        dd.setId(d.getId());
+        dd.setTaskId(task.getId());
+        dd.setDependsOnTaskId(d.getDependsOnTask().getId());
+        dd.setDependsOnTaskTitle(d.getDependsOnTask().getTitle());
+        dd.setDependsOnTaskCode(d.getDependsOnTask().getTaskCode());
+        dd.setDependsOnTaskStatus(d.getDependsOnTask().getStatus());
+        dd.setDependencyType(d.getDependencyType());
+        return dd;
+    }).collect(Collectors.toList()));
+
+    dto.setCreatedAt(task.getCreatedAt());
+    dto.setUpdatedAt(task.getUpdatedAt());
+    return dto;
+}
 }
