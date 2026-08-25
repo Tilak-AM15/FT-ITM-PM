@@ -2,15 +2,21 @@ package com.pmtrack.model;
 
 import com.fasterxml.jackson.annotation.JsonIgnore;
 import jakarta.persistence.*;
-import java.util.ArrayList;
-import java.util.List;
+
 import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.util.ArrayList;
 import java.util.HashSet;
+import java.util.List;
 import java.util.Set;
 
 @Entity
-@Table(name = "tasks", uniqueConstraints = @jakarta.persistence.UniqueConstraint(columnNames = "task_code"))
+@Table(
+    name = "tasks",
+    uniqueConstraints = @jakarta.persistence.UniqueConstraint(
+        columnNames = "task_code"
+    )
+)
 public class Task {
 
     @Id
@@ -58,7 +64,7 @@ public class Task {
 
     private Double estimatedHours = 0.0;
     private Double actualHours = 0.0;
-    private Integer progressPercentage = 0; // 0 - 100%
+    private Integer progressPercentage = 0;
 
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "parent_task_id")
@@ -67,15 +73,39 @@ public class Task {
     private LocalDateTime createdAt = LocalDateTime.now();
     private LocalDateTime updatedAt = LocalDateTime.now();
 
+    /*
+     * Attachment URLs are intentionally ignored when serializing
+     * the JPA entity directly. They are still available through
+     * TaskDto.TaskResponse when explicitly mapped by TaskService.
+     *
+     * This prevents Hibernate LazyInitializationException when
+     * Jackson attempts to serialize a Task outside an active session.
+     */
     @JsonIgnore
     @ElementCollection(fetch = FetchType.LAZY)
-    @CollectionTable(name = "task_attachments", joinColumns = @JoinColumn(name = "task_id"))
+    @CollectionTable(
+        name = "task_attachments",
+        joinColumns = @JoinColumn(name = "task_id")
+    )
     @Column(name = "attachment_url", length = 500)
     private List<String> attachmentUrls = new ArrayList<>();
 
-    public Task() {}
+    public Task() {
+    }
 
-    public Task(Project project, String taskCode, String title, String description, String moduleName, User taskOwner, TaskPriority priority, TaskStatus status, LocalDate startDate, LocalDate dueDate, Double estimatedHours) {
+    public Task(
+        Project project,
+        String taskCode,
+        String title,
+        String description,
+        String moduleName,
+        User taskOwner,
+        TaskPriority priority,
+        TaskStatus status,
+        LocalDate startDate,
+        LocalDate dueDate,
+        Double estimatedHours
+    ) {
         this.project = project;
         this.taskCode = taskCode;
         this.title = title;
@@ -91,66 +121,163 @@ public class Task {
         this.updatedAt = LocalDateTime.now();
     }
 
-    public List<String> getAttachmentUrls() { return attachmentUrls; }
-    public void setAttachmentUrls(List<String> attachmentUrls) { this.attachmentUrls = attachmentUrls != null ? attachmentUrls : new ArrayList<>(); }
-
     @PreUpdate
     public void preUpdate() {
         this.updatedAt = LocalDateTime.now();
     }
 
-    // Getters & Setters
-    public Long getId() { return id; }
-    public void setId(Long id) { this.id = id; }
+    public Long getId() {
+        return id;
+    }
 
-    public Project getProject() { return project; }
-    public void setProject(Project project) { this.project = project; }
+    public void setId(Long id) {
+        this.id = id;
+    }
 
-    public String getTaskCode() { return taskCode; }
-    public void setTaskCode(String taskCode) { this.taskCode = taskCode; }
+    public Project getProject() {
+        return project;
+    }
 
-    public String getTitle() { return title; }
-    public void setTitle(String title) { this.title = title; }
+    public void setProject(Project project) {
+        this.project = project;
+    }
 
-    public String getDescription() { return description; }
-    public void setDescription(String description) { this.description = description; }
+    public String getTaskCode() {
+        return taskCode;
+    }
 
-    public String getModuleName() { return moduleName; }
-    public void setModuleName(String moduleName) { this.moduleName = moduleName; }
+    public void setTaskCode(String taskCode) {
+        this.taskCode = taskCode;
+    }
 
-    public User getTaskOwner() { return taskOwner; }
-    public void setTaskOwner(User taskOwner) { this.taskOwner = taskOwner; }
+    public String getTitle() {
+        return title;
+    }
 
-    public Set<User> getAssignees() { return assignees; }
-    public void setAssignees(Set<User> assignees) { this.assignees = assignees; }
+    public void setTitle(String title) {
+        this.title = title;
+    }
 
-    public TaskPriority getPriority() { return priority; }
-    public void setPriority(TaskPriority priority) { this.priority = priority; }
+    public String getDescription() {
+        return description;
+    }
 
-    public TaskStatus getStatus() { return status; }
-    public void setStatus(TaskStatus status) { this.status = status; }
+    public void setDescription(String description) {
+        this.description = description;
+    }
 
-    public LocalDate getStartDate() { return startDate; }
-    public void setStartDate(LocalDate startDate) { this.startDate = startDate; }
+    public String getModuleName() {
+        return moduleName;
+    }
 
-    public LocalDate getDueDate() { return dueDate; }
-    public void setDueDate(LocalDate dueDate) { this.dueDate = dueDate; }
+    public void setModuleName(String moduleName) {
+        this.moduleName = moduleName;
+    }
 
-    public Double getEstimatedHours() { return estimatedHours; }
-    public void setEstimatedHours(Double estimatedHours) { this.estimatedHours = estimatedHours; }
+    public User getTaskOwner() {
+        return taskOwner;
+    }
 
-    public Double getActualHours() { return actualHours; }
-    public void setActualHours(Double actualHours) { this.actualHours = actualHours; }
+    public void setTaskOwner(User taskOwner) {
+        this.taskOwner = taskOwner;
+    }
 
-    public Integer getProgressPercentage() { return progressPercentage; }
-    public void setProgressPercentage(Integer progressPercentage) { this.progressPercentage = progressPercentage; }
+    public Set<User> getAssignees() {
+        return assignees;
+    }
 
-    public Task getParentTask() { return parentTask; }
-    public void setParentTask(Task parentTask) { this.parentTask = parentTask; }
+    public void setAssignees(Set<User> assignees) {
+        this.assignees = assignees;
+    }
 
-    public LocalDateTime getCreatedAt() { return createdAt; }
-    public void setCreatedAt(LocalDateTime createdAt) { this.createdAt = createdAt; }
+    public TaskPriority getPriority() {
+        return priority;
+    }
 
-    public LocalDateTime getUpdatedAt() { return updatedAt; }
-    public void setUpdatedAt(LocalDateTime updatedAt) { this.updatedAt = updatedAt; }
+    public void setPriority(TaskPriority priority) {
+        this.priority = priority;
+    }
+
+    public TaskStatus getStatus() {
+        return status;
+    }
+
+    public void setStatus(TaskStatus status) {
+        this.status = status;
+    }
+
+    public LocalDate getStartDate() {
+        return startDate;
+    }
+
+    public void setStartDate(LocalDate startDate) {
+        this.startDate = startDate;
+    }
+
+    public LocalDate getDueDate() {
+        return dueDate;
+    }
+
+    public void setDueDate(LocalDate dueDate) {
+        this.dueDate = dueDate;
+    }
+
+    public Double getEstimatedHours() {
+        return estimatedHours;
+    }
+
+    public void setEstimatedHours(Double estimatedHours) {
+        this.estimatedHours = estimatedHours;
+    }
+
+    public Double getActualHours() {
+        return actualHours;
+    }
+
+    public void setActualHours(Double actualHours) {
+        this.actualHours = actualHours;
+    }
+
+    public Integer getProgressPercentage() {
+        return progressPercentage;
+    }
+
+    public void setProgressPercentage(Integer progressPercentage) {
+        this.progressPercentage = progressPercentage;
+    }
+
+    public Task getParentTask() {
+        return parentTask;
+    }
+
+    public void setParentTask(Task parentTask) {
+        this.parentTask = parentTask;
+    }
+
+    public LocalDateTime getCreatedAt() {
+        return createdAt;
+    }
+
+    public void setCreatedAt(LocalDateTime createdAt) {
+        this.createdAt = createdAt;
+    }
+
+    public LocalDateTime getUpdatedAt() {
+        return updatedAt;
+    }
+
+    public void setUpdatedAt(LocalDateTime updatedAt) {
+        this.updatedAt = updatedAt;
+    }
+
+    public List<String> getAttachmentUrls() {
+        return attachmentUrls;
+    }
+
+    public void setAttachmentUrls(List<String> attachmentUrls) {
+        this.attachmentUrls =
+            attachmentUrls != null
+                ? attachmentUrls
+                : new ArrayList<>();
+    }
 }
