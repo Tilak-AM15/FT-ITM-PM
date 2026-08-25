@@ -26,12 +26,15 @@ public interface TaskRepository extends JpaRepository<Task, Long> {
     Optional<Task> findByTaskCode(String taskCode);
 
     /**
-     * Returns tasks where the user is:
-     * 1. The task owner, OR
-     * 2. One of the assigned users.
+     * Find all tasks that are either:
+     * - owned by the user, OR
+     * - assigned to the user.
      *
-     * Explicit JOIN is used instead of MEMBER OF so that
-     * the assignee relationship is queried directly by ID.
+     * The User parameter is intentionally kept in the method signature
+     * because other existing services in the application already call
+     * this method with both userId and User.
+     *
+     * The actual filtering is done using the user's ID.
      */
     @Query("""
         SELECT DISTINCT t
@@ -41,7 +44,10 @@ public interface TaskRepository extends JpaRepository<Task, Long> {
            OR a.id = :userId
         ORDER BY t.createdAt DESC
         """)
-    List<Task> findTasksAssignedToUser(@Param("userId") Long userId);
+    List<Task> findTasksAssignedToUser(
+            @Param("userId") Long userId,
+            @Param("user") User user
+    );
 
     @Query("""
         SELECT COUNT(t)
