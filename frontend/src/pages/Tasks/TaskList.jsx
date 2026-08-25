@@ -20,7 +20,6 @@ export const TaskList = () => {
   const [projects, setProjects] = useState([]);
   const [employees, setEmployees] = useState([]);
 
-  const assignableEmployees = employees;
   
   const [loading, setLoading] = useState(true);
   const [loadingFormData, setLoadingFormData] = useState(false);
