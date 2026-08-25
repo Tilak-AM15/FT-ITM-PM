@@ -20,6 +20,8 @@ export const TaskList = () => {
   const [projects, setProjects] = useState([]);
   const [employees, setEmployees] = useState([]);
 
+  const assignableEmployees = employees;
+  
   const [loading, setLoading] = useState(true);
   const [loadingFormData, setLoadingFormData] = useState(false);
 
@@ -364,6 +366,39 @@ export const TaskList = () => {
    * FILTER TASKS
    * ---------------------------------------------------------
    */
+  /*
+   * ---------------------------------------------------------
+   * PROJECT MEMBERS / ASSIGNABLE EMPLOYEES
+   * ---------------------------------------------------------
+   *
+   * These values must be component-scoped because the create-task
+   * modal uses them. Previously they were declared inside the
+   * filteredTasks.filter() callback, which caused:
+   *
+   * ReferenceError: assignableEmployees is not defined
+   */
+  const selectedProject = projects.find(
+    (project) => String(project.id) === String(projectId)
+  );
+
+  const projectMemberIds = Array.isArray(selectedProject?.members)
+    ? selectedProject.members
+        .map((member) => member?.user?.id)
+        .filter((id) => id != null)
+    : [];
+
+  const assignableEmployees =
+    projectMemberIds.length > 0
+      ? employees.filter(
+          (employee) =>
+            projectMemberIds.some(
+              (id) => Number(id) === Number(employee.id)
+            ) ||
+            Number(employee.id) ===
+              Number(selectedProject?.projectManager?.id)
+        )
+      : employees;
+
   const filteredTasks = tasks.filter(
     (task) => {
       const search =
@@ -387,22 +422,6 @@ export const TaskList = () => {
       const matchPriority =
         priorityFilter === 'ALL' ||
         task.priority === priorityFilter;
-
-      const selectedProject = projects.find(
-    (project) => String(project.id) === String(projectId)
-  );
-  const projectMemberIds = Array.isArray(selectedProject?.members)
-    ? selectedProject.members
-        .map((member) => member?.user?.id)
-        .filter((id) => id != null)
-    : [];
-  const assignableEmployees = projectMemberIds.length > 0
-    ? employees.filter(
-        (employee) =>
-          projectMemberIds.some((id) => Number(id) === Number(employee.id)) ||
-          Number(employee.id) === Number(selectedProject?.projectManager?.id)
-      )
-    : employees;
 
   return (
         matchSearch &&
