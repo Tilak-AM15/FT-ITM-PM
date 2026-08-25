@@ -2,10 +2,11 @@ package com.pmtrack.model;
 
 import com.fasterxml.jackson.annotation.JsonIgnore;
 import jakarta.persistence.*;
-import java.util.ArrayList;
-import java.util.List;
+
 import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.util.ArrayList;
+import java.util.List;
 
 @Entity
 @Table(name = "projects")
@@ -45,20 +46,42 @@ public class Project {
     private Double budgetAmount = 0.0;
     private Double estimatedHours = 0.0;
     private Double actualHours = 0.0;
-    private Integer healthScore = 95; // 0-100%
+    private Integer healthScore = 95;
 
     private LocalDateTime createdDate = LocalDateTime.now();
     private LocalDateTime updatedDate = LocalDateTime.now();
 
+    /*
+     * Do not serialize this lazy JPA collection directly.
+     *
+     * ProjectService explicitly maps documentUrls into
+     * ProjectDto.ProjectResponse while the transaction is active.
+     */
     @JsonIgnore
     @ElementCollection(fetch = FetchType.LAZY)
-    @CollectionTable(name = "project_documents", joinColumns = @JoinColumn(name = "project_id"))
+    @CollectionTable(
+        name = "project_documents",
+        joinColumns = @JoinColumn(name = "project_id")
+    )
     @Column(name = "document_url", length = 500)
     private List<String> documentUrls = new ArrayList<>();
 
-    public Project() {}
+    public Project() {
+    }
 
-    public Project(String projectCode, String name, String clientName, String description, User projectManager, LocalDate startDate, LocalDate endDate, ProjectPriority priority, ProjectStatus status, Double budgetAmount, Double estimatedHours) {
+    public Project(
+        String projectCode,
+        String name,
+        String clientName,
+        String description,
+        User projectManager,
+        LocalDate startDate,
+        LocalDate endDate,
+        ProjectPriority priority,
+        ProjectStatus status,
+        Double budgetAmount,
+        Double estimatedHours
+    ) {
         this.projectCode = projectCode;
         this.name = name;
         this.clientName = clientName;
@@ -74,60 +97,147 @@ public class Project {
         this.updatedDate = LocalDateTime.now();
     }
 
-    public List<String> getDocumentUrls() { return documentUrls; }
-    public void setDocumentUrls(List<String> documentUrls) { this.documentUrls = documentUrls != null ? documentUrls : new ArrayList<>(); }
-
     @PreUpdate
     public void preUpdate() {
         this.updatedDate = LocalDateTime.now();
     }
 
-    // Getters & Setters
-    public Long getId() { return id; }
-    public void setId(Long id) { this.id = id; }
+    public Long getId() {
+        return id;
+    }
 
-    public String getProjectCode() { return projectCode; }
-    public void setProjectCode(String projectCode) { this.projectCode = projectCode; }
+    public void setId(Long id) {
+        this.id = id;
+    }
 
-    public String getName() { return name; }
-    public void setName(String name) { this.name = name; }
+    public String getProjectCode() {
+        return projectCode;
+    }
 
-    public String getClientName() { return clientName; }
-    public void setClientName(String clientName) { this.clientName = clientName; }
+    public void setProjectCode(String projectCode) {
+        this.projectCode = projectCode;
+    }
 
-    public String getDescription() { return description; }
-    public void setDescription(String description) { this.description = description; }
+    public String getName() {
+        return name;
+    }
 
-    public User getProjectManager() { return projectManager; }
-    public void setProjectManager(User projectManager) { this.projectManager = projectManager; }
+    public void setName(String name) {
+        this.name = name;
+    }
 
-    public LocalDate getStartDate() { return startDate; }
-    public void setStartDate(LocalDate startDate) { this.startDate = startDate; }
+    public String getClientName() {
+        return clientName;
+    }
 
-    public LocalDate getEndDate() { return endDate; }
-    public void setEndDate(LocalDate endDate) { this.endDate = endDate; }
+    public void setClientName(String clientName) {
+        this.clientName = clientName;
+    }
 
-    public ProjectPriority getPriority() { return priority; }
-    public void setPriority(ProjectPriority priority) { this.priority = priority; }
+    public String getDescription() {
+        return description;
+    }
 
-    public ProjectStatus getStatus() { return status; }
-    public void setStatus(ProjectStatus status) { this.status = status; }
+    public void setDescription(String description) {
+        this.description = description;
+    }
 
-    public Double getBudgetAmount() { return budgetAmount; }
-    public void setBudgetAmount(Double budgetAmount) { this.budgetAmount = budgetAmount; }
+    public User getProjectManager() {
+        return projectManager;
+    }
 
-    public Double getEstimatedHours() { return estimatedHours; }
-    public void setEstimatedHours(Double estimatedHours) { this.estimatedHours = estimatedHours; }
+    public void setProjectManager(User projectManager) {
+        this.projectManager = projectManager;
+    }
 
-    public Double getActualHours() { return actualHours; }
-    public void setActualHours(Double actualHours) { this.actualHours = actualHours; }
+    public LocalDate getStartDate() {
+        return startDate;
+    }
 
-    public Integer getHealthScore() { return healthScore; }
-    public void setHealthScore(Integer healthScore) { this.healthScore = healthScore; }
+    public void setStartDate(LocalDate startDate) {
+        this.startDate = startDate;
+    }
 
-    public LocalDateTime getCreatedDate() { return createdDate; }
-    public void setCreatedDate(LocalDateTime createdDate) { this.createdDate = createdDate; }
+    public LocalDate getEndDate() {
+        return endDate;
+    }
 
-    public LocalDateTime getUpdatedDate() { return updatedDate; }
-    public void setUpdatedDate(LocalDateTime updatedDate) { this.updatedDate = updatedDate; }
+    public void setEndDate(LocalDate endDate) {
+        this.endDate = endDate;
+    }
+
+    public ProjectPriority getPriority() {
+        return priority;
+    }
+
+    public void setPriority(ProjectPriority priority) {
+        this.priority = priority;
+    }
+
+    public ProjectStatus getStatus() {
+        return status;
+    }
+
+    public void setStatus(ProjectStatus status) {
+        this.status = status;
+    }
+
+    public Double getBudgetAmount() {
+        return budgetAmount;
+    }
+
+    public void setBudgetAmount(Double budgetAmount) {
+        this.budgetAmount = budgetAmount;
+    }
+
+    public Double getEstimatedHours() {
+        return estimatedHours;
+    }
+
+    public void setEstimatedHours(Double estimatedHours) {
+        this.estimatedHours = estimatedHours;
+    }
+
+    public Double getActualHours() {
+        return actualHours;
+    }
+
+    public void setActualHours(Double actualHours) {
+        this.actualHours = actualHours;
+    }
+
+    public Integer getHealthScore() {
+        return healthScore;
+    }
+
+    public void setHealthScore(Integer healthScore) {
+        this.healthScore = healthScore;
+    }
+
+    public LocalDateTime getCreatedDate() {
+        return createdDate;
+    }
+
+    public void setCreatedDate(LocalDateTime createdDate) {
+        this.createdDate = createdDate;
+    }
+
+    public LocalDateTime getUpdatedDate() {
+        return updatedDate;
+    }
+
+    public void setUpdatedDate(LocalDateTime updatedDate) {
+        this.updatedDate = updatedDate;
+    }
+
+    public List<String> getDocumentUrls() {
+        return documentUrls;
+    }
+
+    public void setDocumentUrls(List<String> documentUrls) {
+        this.documentUrls =
+            documentUrls != null
+                ? documentUrls
+                : new ArrayList<>();
+    }
 }
