@@ -1,0 +1,14 @@
+package com.pmtrack.model;
+
+public enum NotificationType {
+    TASK_ASSIGNED,
+    TASK_DUE_SOON,
+    TASK_OVERDUE,
+    TIMESHEET_SUBMITTED,
+    TIMESHEET_APPROVED,
+    TIMESHEET_REJECTED,
+    PENDING_APPROVAL_REMINDER,
+    PROJECT_MILESTONE,
+    PROJECT_DELAY,
+    SYSTEM
+}
