@@ -105,7 +105,7 @@ public Task getTaskEntityById(Long id) {
             .orElseThrow(() -> new RuntimeException("Task not found with id: " + id));
 }
 
-@Transactional
+@Transactional(readOnly = true)
 public TaskDto.TaskResponse createTask(TaskDto.TaskRequest request, User creator) {
     Project project = projectRepository.findById(request.getProjectId())
             .orElseThrow(() -> new RuntimeException("Project not found with id: " + request.getProjectId()));
@@ -210,7 +210,7 @@ public TaskDto.TaskResponse createTask(TaskDto.TaskRequest request, User creator
     return mapToTaskResponse(savedTask);
 }
 
-@Transactional
+@Transactional(readOnly = true)
 public TaskDto.TaskResponse updateTask(Long id, TaskDto.TaskRequest request, User modifier) {
     Task task = getTaskEntityById(id);
     projectService.assertCanManageTasks(task.getProject(), modifier);
